@@ -19,7 +19,6 @@ from transformers import (
     DataCollatorForSeq2Seq,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
-    set_seed,
 )
 
 
@@ -330,23 +329,21 @@ class BIPAG2PModel:
         validation_frame: pd.DataFrame,
         test_frame: pd.DataFrame,
         output_dir: Path,
-        seed: int,
         train_batch_size: int = 96,
         eval_batch_size: int = 16,
     ) -> None:
-        set_seed(seed)
         output_dir.mkdir(parents=True, exist_ok=True)
         train_dataset = G2PDataset(train_frame, self.tokenizer)
         if train_batch_size < 1:
             raise ValueError("train_batch_size deve ser maior que zero.")
         total_steps = (
-            math.ceil(len(train_dataset) / train_batch_size) * 10
+            math.ceil(len(train_dataset) / train_batch_size) * 5
         )
         warmup_steps = int(total_steps * 0.1)
 
         training_options: dict[str, Any] = {
             "train_dataset": train_dataset,
-            "num_train_epochs": 10,
+            "num_train_epochs": 5,
             "learning_rate": 1e-4,
             "optim": "adafactor",
             "lr_scheduler_type": "linear",
@@ -362,8 +359,6 @@ class BIPAG2PModel:
             "metric_for_best_model": "eval_min_per",
             "greater_is_better": False,
             "logging_strategy": "epoch",
-            "seed": seed,
-            "data_seed": seed,
         }
         trainer = self._trainer(
             validation_frame,

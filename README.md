@@ -50,9 +50,7 @@ as etiquetas usadas pelo modelo, remove duplicatas exatas de
 As partições são feitas sobre pares únicos `(dialeto, palavra)`, nunca separando
 pronúncias da mesma palavra/dialeto entre treino, validação e teste. A
 estratificação combina etiqueta de dialeto e comprimento exato da palavra em
-caracteres. Sem `--seed`, o script gera uma seed aleatória e grava o valor usado
-em `data/processed/split_manifest.json`. Para repetir a mesma divisão, informe
-esse valor em `--seed`.
+caracteres. Cada execução de `prepare` pode gerar partições diferentes.
 O script fixa a revisão do dataset `d1e81df1565756229bc20d6841716a7a5560fc80`
 e a revisão do modelo base `google/byt5-small`
 (`68377bdc18a2ffec8a0533fef03b1c513a4dd49d`) para que as entradas não mudem
@@ -61,17 +59,15 @@ silenciosamente.
 ## 2. Retreinar desde o modelo base
 
 ```powershell
-python reproduce_bipa.py train --seed 42
+python reproduce_bipa.py train
 ```
 
 Execute `prepare` ao menos uma vez e confirme que os três arquivos em
-`data/processed/` foram criados antes de iniciar o treinamento. A seed `42` aqui
-controla a aleatoriedade do treino; a seed usada para dividir os dados é a
-registrada no manifesto por `prepare`.
+`data/processed/` foram criados antes de iniciar o treinamento.
 
 `reproduce_bipa.py` prepara os dados e chama a implementação do modelo em
 [`bipa_model.py`](./bipa_model.py). O treinamento parte de `google/byt5-small`
-(não do checkpoint já ajustado) e usa 10 épocas, learning rate `1e-4`,
+(não do checkpoint já ajustado) e usa 5 épocas, learning rate `1e-4`,
 Adafactor, weight decay `0.05`, label smoothing `0.1`, warm-up de 10%,
 scheduler linear, beam search de largura 6 e saída máxima de 35 tokens. A
 seleção do melhor checkpoint usa o Minimum PER na validação. O warm-up de 10%
@@ -147,9 +143,7 @@ O procedimento segue os hiperparâmetros e o tamanho das partições reportados,
 mas não é possível garantir os mesmos números do artigo apenas com os arquivos
 públicos:
 
-1. Os autores não publicaram a seed nem os índices dos exemplos de cada
-   partição. O `42` deste projeto é uma escolha explícita para repetibilidade,
-   não uma recuperação da divisão original.
+1. Os autores não publicaram os índices dos exemplos de cada partição.
 2. Há uma inconsistência no texto: os tamanhos publicados
    (`219.921 / 43.699 / 29.242`) correspondem aproximadamente a
    `75% / 15% / 10%`, enquanto a descrição da validação pode ser lida como 10%
@@ -161,21 +155,21 @@ públicos:
    mostra 6,07%; portanto, compare separadamente validação, teste e dialetos,
    em vez de tratar 3,6% como valor esperado para qualquer execução.
 
-O manifesto salva o hash SHA-256 do TSV baixado, a seed efetivamente usada,
-método e contagens das partições para que a execução possa ser documentada e
-repetida. A seed de `train` controla a aleatoriedade do treinamento e é
-independente da seed usada para criar as partições.
+O manifesto salva o hash SHA-256 do TSV baixado, o método e as contagens das
+partições para documentar a execução. Como as partições são geradas novamente
+em cada execução de `prepare`, os resultados podem variar entre execuções.
 
 ## GitHub e mudança de máquina
 
 O `.gitignore` exclui ambientes virtuais, os TSVs processados e os resultados de
 treinamento em `runs/`, que podem ser recriados. O manifesto da divisão permanece
-versionado; na nova máquina, use a seed registrada nele para refazer a mesma
-partição:
+versionado. Na nova máquina, gere as partições novamente:
 
 ```powershell
-python reproduce_bipa.py prepare --seed <seed-do-manifesto>
+python reproduce_bipa.py prepare
 ```
+
+As partições geradas podem diferir das usadas anteriormente.
 
 Os checkpoints não são enviados ao GitHub. Se precisar preservar o resultado de
 um treinamento já iniciado, transfira a pasta `runs/bipa_byt5/` separadamente

@@ -5,7 +5,6 @@
   "dataset_sha256": "168454f175ddf0db94203e5ffb9076d7233b863a7fc7cfa0b3e3173400c0ce17",
   "base_model": "google/byt5-small",
   "base_model_revision": "68377bdc18a2ffec8a0533fef03b1c513a4dd49d",
-  "seed": 592952782,
   "deduplicated_examples": 295409,
   "split_method": "StratifiedGroupKFold over deduplicated examples, grouped by (dialect, word), stratified by dialect and word length.",
   "splits": {
@@ -27,5 +26,5 @@
     "validation": 43699,
     "test": 29242
   },
-  "reproduction_note": "Reported split sizes imply 75%/15%/10%; exact split membership cannot be reconstructed because the authors did not publish indices or a random seed."
+  "reproduction_note": "Reported split sizes imply 75%/15%/10%; exact split membership cannot be reconstructed because the authors did not publish indices."
 }

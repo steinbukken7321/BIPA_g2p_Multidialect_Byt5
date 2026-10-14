@@ -6,7 +6,6 @@ import argparse
 import hashlib
 import json
 import logging
-import secrets
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -109,11 +108,11 @@ def load_and_clean_dataset(source: Path) -> pd.DataFrame:
     return frame
 
 
-def create_splits(frame: pd.DataFrame, seed: int) -> dict[str, pd.DataFrame]:
+def create_splits(frame: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """Group by dialect-word and stratify by dialect plus word length."""
     strata = frame["dialect"] + "|" + frame["word"].str.len().astype(str)
     groups = pd.factorize(pd.MultiIndex.from_frame(frame[["dialect", "word"]]))[0]
-    outer = StratifiedGroupKFold(n_splits=10, shuffle=True, random_state=seed)
+    outer = StratifiedGroupKFold(n_splits=10, shuffle=True)
     remaining_indices, test_indices = next(
         outer.split(frame[["word"]], strata, groups)
     )
@@ -125,7 +124,7 @@ def create_splits(frame: pd.DataFrame, seed: int) -> dict[str, pd.DataFrame]:
         pd.MultiIndex.from_frame(remaining[["dialect", "word"]])
     )[0]
     validation_splitter = StratifiedGroupKFold(
-        n_splits=6, shuffle=True, random_state=seed
+        n_splits=6, shuffle=True
     )
     train_indices, validation_indices = next(
         validation_splitter.split(
@@ -162,9 +161,7 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def prepare_data(seed: int | None) -> None:
-    used_seed = seed if seed is not None else secrets.randbits(32)
-    LOGGER.info("Seed usada para criar as partições: %s", used_seed)
+def prepare_data() -> None:
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     source = Path(
         hf_hub_download(
@@ -175,7 +172,7 @@ def prepare_data(seed: int | None) -> None:
         )
     )
     frame = load_and_clean_dataset(source)
-    splits = create_splits(frame, used_seed)
+    splits = create_splits(frame)
     split_counts: dict[str, dict[str, int]] = {}
     for name, part in splits.items():
         part.to_csv(PROCESSED_DIR / f"{name}.tsv", sep="\t", index=False)
@@ -193,7 +190,6 @@ def prepare_data(seed: int | None) -> None:
         "dataset_sha256": sha256_file(source),
         "base_model": BASE_MODEL,
         "base_model_revision": BASE_MODEL_REVISION,
-        "seed": used_seed,
         "deduplicated_examples": len(frame),
         "split_method": (
             "StratifiedGroupKFold over deduplicated examples, grouped by "
@@ -207,8 +203,7 @@ def prepare_data(seed: int | None) -> None:
         },
         "reproduction_note": (
             "Reported split sizes imply 75%/15%/10%; exact split membership "
-            "cannot be reconstructed because the authors did not publish indices "
-            "or a random seed."
+            "cannot be reconstructed because the authors did not publish indices."
         ),
     }
     (PROCESSED_DIR / "split_manifest.json").write_text(
@@ -249,7 +244,6 @@ def run_training(args: argparse.Namespace) -> None:
         validation_frame=validation_frame,
         test_frame=test_frame,
         output_dir=resolve_project_path(args.output_dir),
-        seed=args.seed,
         train_batch_size=args.train_batch_size,
         eval_batch_size=args.eval_batch_size,
     )
@@ -288,20 +282,12 @@ def make_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    prepare_parser = subparsers.add_parser(
+    subparsers.add_parser(
         "prepare", help="Baixa e divide o dataset sem vazamento entre partições."
     )
-    prepare_parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="Seed opcional para repetir a divisão; sem ela, uma seed aleatória é gerada.",
-    )
-
     train_parser = subparsers.add_parser(
         "train", help="Treina ByT5-small a partir do modelo base."
     )
-    train_parser.add_argument("--seed", type=int, default=42)
     train_parser.add_argument("--output-dir", default="runs/bipa_byt5")
     train_parser.add_argument("--train-batch-size", type=int, default=96)
     train_parser.add_argument("--eval-batch-size", type=int, default=16)
@@ -330,7 +316,7 @@ def main() -> None:
     )
     args = make_parser().parse_args()
     if args.command == "prepare":
-        prepare_data(args.seed)
+        prepare_data()
     elif args.command == "train":
         run_training(args)
     elif args.command == "inference":
