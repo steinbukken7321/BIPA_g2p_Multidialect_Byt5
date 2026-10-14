@@ -1,0 +1,8 @@
+accelerate
+huggingface_hub
+pandas
+regex
+scikit-learn
+sentencepiece
+transformers
+torch
