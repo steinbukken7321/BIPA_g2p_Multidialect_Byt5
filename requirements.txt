@@ -1,8 +1,7 @@
-accelerate
+torch
+transformers
+sentencepiece
 huggingface_hub
 pandas
 regex
 scikit-learn
-sentencepiece
-transformers
-torch
