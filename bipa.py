@@ -6,7 +6,6 @@ import argparse
 import json
 import logging
 import sys
-import unicodedata
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Sequence
@@ -14,43 +13,21 @@ from typing import Any, Sequence
 import pandas as pd
 import regex
 import torch
-from huggingface_hub import hf_hub_download
-from sklearn.model_selection import StratifiedGroupKFold
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
+from bipa_dataset import (
+    DATASET_ID,
+    DATASET_REVISION,
+    DIALECTS,
+    SPLIT_SEED,
+    create_splits,
+    load_dataset,
+)
 
 MODEL_ID = "thiagomonteles/BIPA_g2p_Multidialect_Byt5"
 MODEL_REVISION = "9068d5499496440873884c1e9ab91adaf971fdda"
-DATASET_ID = "thiagomonteles/BIPA"
-DATASET_FILE = "por_bz_com_dialeto_55K.tsv"
-DATASET_REVISION = "d1e81df1565756229bc20d6841716a7a5560fc80"
-SPLIT_SEED = 42
 PROJECT_DIR = Path(__file__).resolve().parent
 IPA_GRAPHEMES = regex.compile(r"\X")
-DIALECTS = (
-    "[brasil]",
-    "[rio-de-janeiro]",
-    "[são-paulo]",
-    "[regiao-sul]",
-    "[regiao-nordeste]",
-    "[regiao-centro-oeste]",
-)
-DIALECT_ALIASES = {
-    "brazil": "[brasil]",
-    "brazil general": "[brasil]",
-    "rio de janeiro": "[rio-de-janeiro]",
-    "sao paulo": "[são-paulo]",
-    "southern brazil": "[regiao-sul]",
-    "south region": "[regiao-sul]",
-    "south": "[regiao-sul]",
-    "northeast brazil": "[regiao-nordeste]",
-    "northeast region": "[regiao-nordeste]",
-    "central west brazil": "[regiao-centro-oeste]",
-    "center west brazil": "[regiao-centro-oeste]",
-    "center west region": "[regiao-centro-oeste]",
-    "central west region": "[regiao-centro-oeste]",
-    "rural central brazil": "[regiao-centro-oeste]",
-}
 
 
 def load_model() -> tuple[Any, Any, torch.device]:
@@ -93,99 +70,6 @@ def generate(
                 )
             )
     return predictions
-
-
-def normalize_dialect(label: str) -> str:
-    normalized = unicodedata.normalize("NFKD", label)
-    normalized = "".join(
-        char for char in normalized if not unicodedata.combining(char)
-    )
-    normalized = " ".join(
-        normalized.casefold()
-        .replace("_", " ")
-        .replace("-", " ")
-        .replace("(", "")
-        .replace(")", "")
-        .split()
-    )
-    try:
-        return DIALECT_ALIASES[normalized]
-    except KeyError as exc:
-        raise ValueError(f"Rótulo de dialeto não reconhecido no dataset: {label!r}") from exc
-
-
-def download_dataset() -> pd.DataFrame:
-    dataset_path = hf_hub_download(
-        repo_id=DATASET_ID,
-        filename=DATASET_FILE,
-        repo_type="dataset",
-        revision=DATASET_REVISION,
-    )
-    frame = pd.read_csv(dataset_path, sep="\t", dtype=str, keep_default_na=False)
-    required = {"dialeto", "palavra", "pronuncia"}
-    missing = required.difference(frame.columns)
-    if missing:
-        raise ValueError(
-            f"Colunas ausentes no TSV do BIPA: {', '.join(sorted(missing))}"
-        )
-    frame = frame.rename(
-        columns={
-            "dialeto": "dialect_label",
-            "palavra": "word",
-            "pronuncia": "pronunciation",
-        }
-    )
-    frame["dialect"] = frame["dialect_label"].map(normalize_dialect)
-    frame = frame.loc[
-        frame["word"].str.strip().ne("")
-        & frame["pronunciation"].str.strip().ne("")
-    ].copy()
-    frame = frame.drop_duplicates(["dialect", "word", "pronunciation"])
-    return frame[["dialect", "word", "pronunciation"]].reset_index(drop=True)
-
-
-def create_splits(frame: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    """Create group-safe 75/15/10 splits stratified by dialect and word length."""
-    strata = frame["dialect"] + "|" + frame["word"].str.len().astype(str)
-    groups = pd.factorize(
-        pd.MultiIndex.from_frame(frame[["dialect", "word"]])
-    )[0]
-    test_splitter = StratifiedGroupKFold(
-        n_splits=10, shuffle=True, random_state=SPLIT_SEED
-    )
-    remaining_indices, test_indices = next(
-        test_splitter.split(frame[["word"]], strata, groups)
-    )
-    remaining = frame.iloc[remaining_indices].reset_index(drop=True)
-    remaining_strata = (
-        remaining["dialect"] + "|" + remaining["word"].str.len().astype(str)
-    )
-    remaining_groups = pd.factorize(
-        pd.MultiIndex.from_frame(remaining[["dialect", "word"]])
-    )[0]
-    validation_splitter = StratifiedGroupKFold(
-        n_splits=6, shuffle=True, random_state=SPLIT_SEED
-    )
-    train_indices, validation_indices = next(
-        validation_splitter.split(
-            remaining[["word"]], remaining_strata, remaining_groups
-        )
-    )
-    splits = {
-        "train": remaining.iloc[train_indices].reset_index(drop=True),
-        "validation": remaining.iloc[validation_indices].reset_index(drop=True),
-        "test": frame.iloc[test_indices].reset_index(drop=True),
-    }
-    pair_sets = {
-        name: set(zip(part["dialect"], part["word"], strict=False))
-        for name, part in splits.items()
-    }
-    split_names = tuple(splits)
-    for index, first in enumerate(split_names):
-        for second in split_names[index + 1 :]:
-            if pair_sets[first] & pair_sets[second]:
-                raise RuntimeError(f"Vazamento entre {first} e {second}.")
-    return splits
 
 
 def levenshtein(left: list[str], right: list[str]) -> int:
@@ -283,7 +167,7 @@ def score_predictions(
 
 
 def run_evaluation(args: argparse.Namespace) -> None:
-    frame = download_dataset()
+    frame = load_dataset()
     splits = create_splits(frame)
     test_frame = splits[args.split]
     pairs = test_frame[["dialect", "word"]].drop_duplicates().reset_index(drop=True)
